@@ -1,0 +1,16 @@
+{
+  "mongoDb": {
+    "host": "MONGODB_HOST",
+    "port": "MONGODB_PORT",
+    "dbName": "MONGODB_DB_NAME",
+    "username": "MONGODB_USERNAME",
+    "password": "MONGODB_PASSWORD"
+  },
+  "redis": {
+    "port": "REDIS_PORT",
+    "host": "REDIS_HOST",
+    "username": "REDIS_USERNAME",
+    "password": "REDIS_PASSWORD",
+    "db": "REDIS_DATABASE"
+  }
+}
