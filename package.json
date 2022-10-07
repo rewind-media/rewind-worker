@@ -41,7 +41,8 @@
     "_copy": "cp -r config dist/config",
     "build": "npm run _build && npm run _copy",
     "clean": "rm -rf build",
-    "build-and-run": "npm run clean && npm run build && npm run copy && npm run start"
+    "build-and-run": "npm run clean && npm run build && npm run copy && npm run start",
+    "pub": "npm version patch && npm publish"
   },
   "devDependencies": {
     "prettier": "^2.7.1"
