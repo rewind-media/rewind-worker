@@ -38,7 +38,7 @@
   "scripts": {
     "start": "cd dist && node main.js",
     "_build": "tsc",
-    "_copy": "cp -r config dist/config",
+    "_copy": "cp -r config dist",
     "build": "npm run _build && npm run _copy",
     "clean": "rm -rf build",
     "build-and-run": "npm run clean && npm run build && npm run copy && npm run start",
