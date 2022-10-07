@@ -1,3 +1,3 @@
-import {RootLogger} from "@rewind-media/rewind-common/dist/util";
+import { RootLogger } from "@rewind-media/rewind-common";
 
-export const WorkerLogger = RootLogger.getChildCategory("Worker")
+export const WorkerLogger = RootLogger.getChildCategory("Worker");
