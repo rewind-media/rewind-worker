@@ -3,9 +3,9 @@ name: Docker Image CI
 on:
   push:
     branches:
-      - 'main'
+      - "main"
     tags:
-      - 'v*'
+      - "v*"
 
 jobs:
   build:
@@ -29,4 +29,3 @@ jobs:
           tags: ${{ secrets.DOCKER_HUB_USERNAME }}/rewind-worker:latest
           cache-from: type=registry,ref=${{ secrets.DOCKER_HUB_USERNAME }}/rewind-worker:buildcache
           cache-to: type=registry,ref=${{ secrets.DOCKER_HUB_USERNAME }}/rewind-worker:buildcache,mode=max
-
