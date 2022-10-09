@@ -1,6 +1,6 @@
 {
   "name": "@rewind-media/rewind-worker",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Back-end worker for Rewind.",
   "license": "AGPLv3",
   "repository": {
