@@ -3,7 +3,11 @@ import { ChildProcess } from "child_process";
 import { PassThrough } from "stream";
 import Mp4Frag, { SegmentObject } from "mp4frag";
 import { FfProbeInfo } from "./util/ffprobe";
-import { Cache } from "@rewind-media/rewind-common";
+import {
+  Cache,
+  StreamMetadata,
+  StreamSegmentMetadata,
+} from "@rewind-media/rewind-common";
 import { WorkerLogger } from "./log";
 import { StreamProps } from "@rewind-media/rewind-protocol";
 import EventEmitter from "events";
@@ -36,11 +40,6 @@ export class StreamEventEmitter extends EventEmitter {
 
 const log = WorkerLogger.getChildCategory("Stream");
 
-interface SegmentInfo {
-  index: number;
-  duration: number;
-}
-
 // TODO copy streams types that are compatible with mp4
 // https://developer.mozilla.org/en-US/docs/Web/Media/Formats/Video_codecs
 // https://developer.mozilla.org/en-US/docs/Web/Media/Formats/Audio_codecs
@@ -52,7 +51,7 @@ export class Stream extends StreamEventEmitter {
   private sourcePipe: PassThrough;
   private m4f: Mp4Frag;
   private processedSecs: number = 0;
-  private segments: SegmentInfo[] = [];
+  private segments: StreamSegmentMetadata[] = [];
   readonly expirationDate: Date;
 
   private static readonly mp4VideoCodecs = [
@@ -205,9 +204,9 @@ export class Stream extends StreamEventEmitter {
           });
           this.segments.sort((a, b) => a.index - b.index);
           return Promise.all([
-            this.cache.putM3u8(
+            this.cache.putStreamMetadata(
               this.props.id,
-              this.mkInitM3u8(),
+              this.mkStreamMetadata(),
               this.expirationDate
             ),
             this.cache.putSegmentM4s(
@@ -268,7 +267,7 @@ export class Stream extends StreamEventEmitter {
       this.removeAllListeners();
       this.cmd.removeAllListeners();
       await Promise.all([
-        this.cache.delM3u8(this.props.id),
+        this.cache.delStreamMetadata(this.props.id),
         this.cache.delInitMp4(this.props.id),
         ...this.segments.map((seg) =>
           this.cache.delSegmentM4s(this.props.id, seg.index)
@@ -287,16 +286,9 @@ export class Stream extends StreamEventEmitter {
     return this._destroy();
   }
 
-  private mkInitM3u8() {
-    return (
-      "#EXTM3U\n" +
-      "#EXT-X-VERSION:7\n" +
-      "#EXT-X-TARGETDURATION:5\n" +
-      "#EXT-X-MEDIA-SEQUENCE:0\n" +
-      '#EXT-X-MAP:URI="init-stream.mp4"\n' +
-      this.segments
-        .map((seg) => `#EXTINF:${seg.duration},\n${seg.index}.m4s\n`)
-        .join("")
-    );
+  private mkStreamMetadata(): StreamMetadata {
+    return {
+      segments: this.segments,
+    };
   }
 }
