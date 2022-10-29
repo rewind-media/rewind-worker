@@ -73,6 +73,8 @@ export class Stream extends StreamEventEmitter {
   ];
   private _init: Buffer | undefined;
   private cache: Cache;
+  private hasInit: boolean = false;
+  private hasSegment: boolean = false;
 
   constructor(props: StreamProps, cache: Cache) {
     super();
@@ -94,8 +96,8 @@ export class Stream extends StreamEventEmitter {
 
     //TODO a crappy way of limiting bandwidth - this should be configurable and autoscaling
     const limiters = {
-      crf: "24", // TODO
-      bufsize: "64k",
+      // crf: "24", // TODO
+      // bufsize: "64k",
     };
 
     const output = new ff.FFmpegOutput(`pipe:1`, {
@@ -127,7 +129,7 @@ export class Stream extends StreamEventEmitter {
     );
   }
 
-  run(): Promise<Stream | undefined> {
+  run() {
     log.info(`Stream ${this.props.id} running FFMPEG: ${this.cmd.toString()}`);
     this.m4f.resetCache();
     this.process = this.cmd.spawn();
@@ -179,98 +181,92 @@ export class Stream extends StreamEventEmitter {
         this.emit("fail");
       });
     const processOut = this.process.stdout;
-    return new Promise<Stream>((resolve, reject) => {
-      let hasSegment = false;
-      let hasInit = false;
-      if (!processOut) {
-        setTimeout(() => {
-          this.process?.kill();
-        }, 100);
-      } else {
-        processOut
-          .pipe(this.m4f)
-          .on("segment", async (segment: SegmentObject) => {
-            // processOut?.pause();
-            const buffer = segment.segment;
-            if (!buffer) {
-              log.warn(`Got empty segment: ${JSON.stringify(segment)}`);
-              return;
-            }
+    this.hasSegment = false;
+    this.hasInit = false;
+    if (!processOut) {
+      setTimeout(() => {
+        this.process?.kill();
+      }, 100);
+    } else {
+      processOut
+        .pipe(this.m4f)
+        .on("segment", async (segment: SegmentObject) => {
+          // processOut?.pause();
+          const buffer = segment.segment;
+          if (!buffer) {
+            log.warn(`Got empty segment: ${JSON.stringify(segment)}`);
+            return;
+          }
 
-            this.processedSecs += segment.duration;
-            this.segments.push({
-              index: segment.sequence,
-              duration: segment.duration,
-            });
-            this.segments.sort((a, b) => a.index - b.index);
-            return Promise.all([
-              this.cache.putM3u8(
-                this.props.id,
-                this.mkInitM3u8(),
-                this.expirationDate
-              ),
-              this.cache.putSegmentM4s(
-                this.props.id,
-                segment.sequence,
-                buffer,
-                this.expirationDate
-              ),
-            ]).then(() => {
-              // processOut?.resume();
-              if (!hasSegment) {
-                hasSegment = true;
-                if (hasInit) {
-                  resolve(this);
-                  this.emit("init");
-                }
-              }
-
-              log.info(
-                `Stream ${this.props.id}, Segment ${segment.sequence}, ${
-                  this.processedSecs + this.props.startOffset
-                }/${this.props.duration} seconds`
-              );
-            });
-          })
-          // TODO specify the emitted type in @types/mp4frag
-          .on(
-            "initialized",
-            async (init: {
-              mime: string;
-              initialization: Buffer;
-              m3u8: string;
-            }) => {
-              if (!hasInit && init.initialization) {
-                await this.cache.putInitMp4(
-                  this.props.id,
-                  init.initialization,
-                  this.expirationDate
-                );
-                hasInit = true;
-                if (hasSegment) {
-                  resolve(this);
-                  this.emit("init");
-                }
-              }
-            }
-          )
-          .on("error", (reason) => {
-            log.error(`Stream ${this.props.id} failed`, reason);
+          this.processedSecs += segment.duration;
+          this.segments.push({
+            index: segment.sequence,
+            duration: segment.duration,
           });
-      }
-    }).catch((reason) => {
-      log.error(
-        `Stream ${JSON.stringify(this.props)} failed with reason ${reason}`
-      );
-      return undefined;
-    });
+          this.segments.sort((a, b) => a.index - b.index);
+          return Promise.all([
+            this.cache.putM3u8(
+              this.props.id,
+              this.mkInitM3u8(),
+              this.expirationDate
+            ),
+            this.cache.putSegmentM4s(
+              this.props.id,
+              segment.sequence,
+              buffer,
+              this.expirationDate
+            ),
+          ]).then(() => {
+            // processOut?.resume();
+            if (!this.hasSegment) {
+              this.hasSegment = true;
+              if (this.hasInit) {
+                this.emit("init");
+              }
+            }
+
+            log.info(
+              `Stream ${this.props.id}, Segment ${segment.sequence}, ${
+                this.processedSecs + this.props.startOffset
+              }/${this.props.duration} seconds`
+            );
+          });
+        })
+        // TODO specify the emitted type in @types/mp4frag
+        .on(
+          "initialized",
+          async (init: {
+            mime: string;
+            initialization: Buffer;
+            m3u8: string;
+          }) => {
+            if (!this.hasInit && init.initialization) {
+              await this.cache.putInitMp4(
+                this.props.id,
+                init.initialization,
+                this.expirationDate
+              );
+              this.hasInit = true;
+              if (this.hasSegment) {
+                this.emit("init");
+              }
+            }
+          }
+        )
+        .on("error", (reason) => {
+          log.error(`Stream ${this.props.id} failed`, reason);
+        });
+    }
   }
 
   async _destroy(): Promise<void> {
     try {
       this.process?.removeAllListeners();
       this.process?.stdout?.removeAllListeners();
+      this.process?.stdout?.destroy();
       this.process?.kill();
+      this.removeAllListeners();
+      this.cmd.removeAllListeners();
       await Promise.all([
         this.cache.delM3u8(this.props.id),
         this.cache.delInitMp4(this.props.id),

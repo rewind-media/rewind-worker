@@ -1,79 +1,55 @@
 import { StreamManager } from "./StreamManager";
 import {
-  Database,
   loadConfig,
-  mkMongoDatabase,
-  mkRedisCache,
-  Cache,
+  RedisJobQueue,
+  Job,
+  WorkerContext,
+  WorkerEventEmitter,
+  RedisCache,
 } from "@rewind-media/rewind-common";
 import { WorkerLogger } from "./log";
+import Redis from "ioredis";
+import { StreamProps } from "@rewind-media/rewind-protocol";
 
 const log = WorkerLogger.getChildCategory("main");
 const config = loadConfig();
-mkMongoDatabase(config.databaseConfig).then((db: Database) => {
-  mkRedisCache(config.cacheConfig).then(async (cache: Cache) => {
-    const streamManager = new StreamManager(cache);
-    const jobQueue = cache.getJobQueue("JobQueue");
-    while (true) {
-      const job = await jobQueue.listen();
-      log.info(`Got job: ${JSON.stringify(job)}`);
+const redis = new Redis(config.cacheConfig);
+const cache = new RedisCache(redis);
+const streamManager = new StreamManager(cache);
+const streamJobQueue = new RedisJobQueue<StreamProps, undefined>(
+  redis,
+  "Stream"
+);
 
-      await jobQueue
-        .monitor(job.id)
-        .then((eventEmitter) => {
-          log.info(`Monitoring Job ${job.id}`);
-          eventEmitter.on("cancel", async () => {
-            log.info(`Got cancel event for ${job.id}`);
-            await streamManager.deleteStream(job.payload.id);
-          });
-          return jobQueue.current(job.id);
-        })
-        .then(async (state) => {
-          switch (state) {
-            case "submit":
-              log.info(`Starting submitted job ${job.id}`);
-              return (
-                streamManager
-                  .updateStream(job.payload)
-                  //TODO emit JobState.SUCCESS.
-                  .then((stream) => {
-                    if (stream) {
-                      stream.on("fail", () =>
-                        jobQueue.update(
-                          job.id,
-                          "fail",
-                          stream?.expirationDate ?? nowPlusOneHour()
-                        )
-                      );
-                      stream.on("succeed", () =>
-                        jobQueue.update(
-                          job.id,
-                          "succeed",
-                          stream?.expirationDate ?? nowPlusOneHour()
-                        )
-                      );
-                    }
-                    jobQueue.update(
-                      job.id,
-                      stream ? "start" : "fail",
-                      stream?.expirationDate ?? nowPlusOneHour()
-                    );
-                  })
-              );
-            case "cancel":
-            case "fail":
-              log.warn(
-                `Job ${job.id} has failed, possibly before emitter was set up.`
-              );
-              return;
-            case "succeed":
-              return;
-          }
-        });
+// TODO stream cleanup queue
+streamJobQueue.register(
+  async (
+    job: Job<StreamProps, undefined>,
+    context: WorkerContext<undefined>,
+    workerEvents: WorkerEventEmitter
+  ) => {
+    log.info(`Received job ${JSON.stringify(job)}`);
+    const stream = streamManager.updateStream(job.payload);
+    if (stream) {
+      stream.on("fail", () => {
+        context.fail("Failed to process stream");
+      });
+      stream.on("succeed", () => {
+        context.success(undefined);
+      });
+
+      stream.on("init", () => {
+        log.info(`Stream ${job.payload.id} initialized.`);
+        context.start();
+      });
+
+      workerEvents.on("cancel", async () => {
+        log.info(`Stream ${job.payload.id} received cancel event`);
+        await streamManager.deleteStream(job.payload.id);
+      });
+      stream.run();
+    } else {
+      context.fail("Failed to initialize stream");
     }
-  });
-});
-
-function nowPlusOneHour(): Date {
-  return new Date(Date.now() + 3600000);
-}
+  }
+);

@@ -6,12 +6,12 @@ export class StreamManager {
   private readonly streams: Map<string, Stream>;
   private cache: Cache;
 
-  updateStream(monProps: StreamProps): Promise<Stream | undefined> {
+  updateStream(monProps: StreamProps): Stream {
     const oldMon = this.streams.get(monProps.id);
     const newMon = new Stream(monProps, this.cache);
     this.streams.set(monProps.id, newMon);
     oldMon?.destroy();
-    return newMon.run();
+    return newMon;
   }
 
   async deleteStream(id: string): Promise<void> {
