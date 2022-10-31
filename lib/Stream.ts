@@ -136,18 +136,10 @@ export class Stream extends StreamEventEmitter {
 
     this.cmd
       .on("exit", async (code, signal) => {
-        if (code !== 0) {
-          this.emit("fail");
-        } else {
-          this.emit("succeed");
-        }
+        await this.endStream(code !== 0);
       })
       .on("close", async (code, signal) => {
-        if (code !== 0) {
-          this.emit("fail");
-        } else {
-          this.emit("succeed");
-        }
+        await this.endStream(code !== 0);
       })
       .on("disconnect", async () => {
         // TODO do anything?
@@ -159,25 +151,17 @@ export class Stream extends StreamEventEmitter {
 
     this.process
       .on("exit", async (code, signal) => {
-        if (code !== 0) {
-          this.emit("fail");
-        } else {
-          this.emit("succeed");
-        }
+        await this.endStream(code !== 0);
       })
       .on("close", async (code, signal) => {
-        if (code !== 0) {
-          this.emit("fail");
-        } else {
-          this.emit("succeed");
-        }
+        await this.endStream(code !== 0);
       })
       .on("disconnect", async () => {
         // TODO do anything?
       })
-      .on("error", (err) => {
+      .on("error", async (err) => {
         log.error(`Stream ${this.props.id} failed`, err);
-        this.emit("fail");
+        await this.endStream(false);
       });
     const processOut = this.process.stdout;
     this.hasSegment = false;
@@ -286,9 +270,23 @@ export class Stream extends StreamEventEmitter {
     return this._destroy();
   }
 
-  private mkStreamMetadata(): StreamMetadata {
+  private mkStreamMetadata(complete: boolean = false): StreamMetadata {
     return {
       segments: this.segments,
+      complete: complete,
     };
+  }
+
+  private async endStream(success: boolean) {
+    await this.cache.putStreamMetadata(
+      this.props.id,
+      this.mkStreamMetadata(true),
+      this.expirationDate
+    );
+    if (success) {
+      this.emit("fail");
+    } else {
+      this.emit("succeed");
+    }
   }
 }
