@@ -11,7 +11,8 @@ import {
 import { WorkerLogger } from "./log";
 import { StreamProps } from "@rewind-media/rewind-protocol";
 import EventEmitter from "events";
-import _ from "lodash";
+import { first } from "lodash";
+import { FFProbeStream } from "ffprobe";
 
 const ff = require("fessonia")({
   debug: true,
@@ -70,6 +71,8 @@ export class Stream extends StreamEventEmitter {
     "mp3",
     "opus",
   ];
+
+  private static readonly mp4SubtitleCodecs = ["sbtt"];
   private _init: Buffer | undefined;
   private cache: Cache;
   private hasInit: boolean = false;
@@ -100,7 +103,7 @@ export class Stream extends StreamEventEmitter {
     };
 
     const output = new ff.FFmpegOutput(`pipe:1`, {
-      ...(Stream.isMp4CopyCompatible(props.mediaInfo.info) && { c: "copy" }),
+      ...Stream.mkAllStreamOptions(props.mediaInfo.info),
       ...limiters,
       f: "mp4",
       // an: '',
@@ -117,7 +120,7 @@ export class Stream extends StreamEventEmitter {
   }
 
   private static isMp4CopyCompatible(info: FfProbeInfo) {
-    return !_.first(
+    return !first(
       info.streams.filter(
         (it) =>
           it.codec_name &&
@@ -126,6 +129,61 @@ export class Stream extends StreamEventEmitter {
             .indexOf(it.codec_name.toLowerCase()) === -1
       )
     );
+  }
+
+  private static mkAllStreamOptions(info: FfProbeInfo): {
+    [p: string]: string;
+  } {
+    return Object.assign(
+      {},
+      ...info.streams.map((it) => this.mkStreamOptions(it) ?? {})
+    );
+  }
+  private static mkStreamOptions(
+    stream: FFProbeStream
+  ): { [p: string]: string } | undefined {
+    if (stream.codec_type == "video") {
+      const key = `c:v:${stream.index}`;
+      if (
+        stream.codec_name &&
+        this.mp4VideoCodecs.includes(stream.codec_name)
+      ) {
+        return { [key]: "copy" };
+      } else {
+        return { [key]: "h264" };
+      }
+    } else if (stream.codec_type == "audio") {
+      const key = `c:a:${stream.index}`;
+      if (stream.codec_name && this.mp4AudioCodes.includes(stream.codec_name)) {
+        return { [key]: "copy" };
+      } else {
+        return { [key]: "aac" };
+      }
+    } else if (
+      // @ts-ignore
+      // TODO fix the typescript values for stream.codec_type
+      stream.codec_type == "subtitle"
+    ) {
+      const key = `c:s:${stream.index}`;
+      if (
+        stream.codec_name &&
+        this.mp4SubtitleCodecs.includes(stream.codec_name)
+      ) {
+        return { [key]: "copy" };
+      } else {
+        return { [key]: "sbtt" };
+      }
+    } else if (stream.codec_type == "images") {
+      log.error(
+        `Stream codec type 'images' with name ${stream.codec_name} is not supported`
+      );
+      return undefined;
+    } else {
+      log.error(
+        `Unknown stream codec type '${stream.codec_type}' with codec '${stream.codec_name}'`
+      );
+      return undefined;
+    }
   }
 
   run() {
