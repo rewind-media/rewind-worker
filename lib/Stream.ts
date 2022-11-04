@@ -111,6 +111,7 @@ export class Stream extends StreamEventEmitter {
       // hls_allow_cache: "0",
       // hls_flags: "+delete_segments+omit_endlist",
       // hls_playlist_type: "vod"
+      ac: "2", // TODO makes audio streams stereo only because 5.1 doesn't work on android hls.js for some reason
       movflags: "+frag_keyframe+empty_moov+default_base_moof",
     });
     this.cmd = new ff.FFmpegCommand();
