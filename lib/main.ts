@@ -6,12 +6,13 @@ import {
   WorkerContext,
   WorkerEventEmitter,
   RedisCache,
+  getFile,
+  readFile,
 } from "@rewind-media/rewind-common";
 import { WorkerLogger } from "./log";
 import Redis from "ioredis";
 import { ImageInfo, StreamProps } from "@rewind-media/rewind-protocol";
 import "fs/promises";
-import { readFile } from "fs/promises";
 
 const log = WorkerLogger.getChildCategory("main");
 const config = loadConfig();
@@ -25,7 +26,6 @@ const streamJobQueue = new RedisJobQueue<StreamProps, undefined>(
 
 const imageJobQueue = new RedisJobQueue<ImageInfo, undefined>(redis, "Image");
 
-// TODO stream cleanup queue
 streamJobQueue.register(
   async (
     job: Job<StreamProps, undefined>,
@@ -66,7 +66,9 @@ imageJobQueue.register(
   ) => {
     context.start();
     try {
-      const image = await readFile(job.payload.path);
+      const image = await getFile(job.payload.location).then((it) =>
+        readFile(it)
+      );
       await cache.putImage(job.payload.id, image, 3600);
       context.success(undefined);
     } catch (e) {

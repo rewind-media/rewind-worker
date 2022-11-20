@@ -1,10 +1,11 @@
 import { FFmpegCommand } from "fessonia";
 import { ChildProcess } from "child_process";
-import { PassThrough } from "stream";
+import { PassThrough, Readable } from "stream";
 import Mp4Frag, { SegmentObject } from "mp4frag";
 import { FfProbeInfo } from "./util/ffprobe";
 import {
   Cache,
+  getFile,
   StreamMetadata,
   StreamSegmentMetadata,
 } from "@rewind-media/rewind-common";
@@ -77,6 +78,7 @@ export class Stream extends StreamEventEmitter {
   private cache: Cache;
   private hasInit: boolean = false;
   private hasSegment: boolean = false;
+  private fileStream?: Readable;
 
   constructor(props: StreamProps, cache: Cache) {
     super();
@@ -88,7 +90,7 @@ export class Stream extends StreamEventEmitter {
     );
     this.m4f = new Mp4Frag();
 
-    const input = new ff.FFmpegInput(props.mediaInfo.path, {
+    const input = new ff.FFmpegInput("pipe:0", {
       loglevel: "quiet",
       probesize: "1000000",
       analyzeduration: "1000000",
@@ -191,6 +193,8 @@ export class Stream extends StreamEventEmitter {
     log.info(`Stream ${this.props.id} running FFMPEG: ${this.cmd.toString()}`);
     this.m4f.resetCache();
     this.process = this.cmd.spawn();
+    this.fileStream?.destroy();
+
     this.segments = [];
 
     this.cmd
@@ -222,14 +226,32 @@ export class Stream extends StreamEventEmitter {
         log.error(`Stream ${this.props.id} failed`, err);
         await this.endStream(false);
       });
+    const processIn = this.process.stdin;
     const processOut = this.process.stdout;
+    if (processIn) {
+    }
     this.hasSegment = false;
     this.hasInit = false;
-    if (!processOut) {
+    if (!processOut || !processIn) {
       setTimeout(() => {
         this.process?.kill();
       }, 100);
     } else {
+      getFile(this.props.mediaInfo.location).then((readable) => {
+        this.fileStream = readable;
+        const errorHandler = (e: any) => {
+          log.error(
+            `Error reading file from ${JSON.stringify(
+              this.props.mediaInfo.location
+            )}`,
+            e
+          );
+          processIn.end();
+        };
+        readable.pipe(processIn).on("error", errorHandler);
+        readable.on("error", errorHandler);
+      });
+
       processOut
         .pipe(this.m4f)
         .on("segment", async (segment: SegmentObject) => {
@@ -303,6 +325,7 @@ export class Stream extends StreamEventEmitter {
 
   async _destroy(): Promise<void> {
     try {
+      this.fileStream?.destroy();
       this.process?.removeAllListeners();
       this.process?.stdout?.removeAllListeners();
       this.process?.stdout?.destroy();
@@ -326,7 +349,9 @@ export class Stream extends StreamEventEmitter {
     // The first pass is to free RAM, the second to try and catch the rest, and there's a TTL in the worst case.
     log.info(`Killing stream ${this.props.id}`);
     setTimeout(() => this._destroy(), 30000);
-    return this._destroy();
+    return this._destroy().then(() =>
+      log.info(`Killed Stream ${this.props.id}`)
+    );
   }
 
   private mkStreamMetadata(complete: boolean = false): StreamMetadata {
