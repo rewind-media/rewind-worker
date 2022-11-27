@@ -1,24 +1,143 @@
 import { FFmpegCommand } from "fessonia";
 import { ChildProcess } from "child_process";
-import { PassThrough, Readable } from "stream";
+import { PassThrough, Readable, Writable } from "stream";
 import Mp4Frag, { SegmentObject } from "mp4frag";
 import { FfProbeInfo } from "./util/ffprobe";
 import {
   Cache,
   getFile,
+  Mime,
+  readFile,
   StreamMetadata,
   StreamSegmentMetadata,
 } from "@rewind-media/rewind-common";
 import { WorkerLogger } from "./log";
-import { StreamProps } from "@rewind-media/rewind-protocol";
+import { isFileLocation, StreamProps } from "@rewind-media/rewind-protocol";
 import EventEmitter from "events";
-import { first } from "lodash";
 import { FFProbeStream } from "ffprobe";
 
 const ff = require("fessonia")({
   debug: true,
   log_warnings: true,
 });
+
+class StreamDataHelper {
+  private readonly cache: Cache;
+  private setSegment: boolean = false;
+  private setInitMp4: boolean = false;
+  private runInit: boolean = true;
+  private readonly onInit: () => void;
+  private readonly expiration: Date;
+  private readonly streamId: string;
+  constructor(
+    cache: Cache,
+    streamId: string,
+    expiration: Date,
+    onInit: () => void
+  ) {
+    this.cache = cache;
+    this.onInit = onInit;
+    this.expiration = expiration;
+    this.streamId = streamId;
+  }
+  async putSegment(segment: SegmentObject) {
+    if (segment.segment) {
+      await this.cache.putSegmentM4s(
+        this.streamId,
+        segment.sequence,
+        segment.segment,
+        this.expiration
+      );
+      this.setSegment = true;
+      await this.runInitOnceIfReady();
+    }
+  }
+
+  async putInitMp4(initMp4: Buffer) {
+    await this.cache.putInitMp4(this.streamId, initMp4, this.expiration);
+    this.setInitMp4 = true;
+    await this.runInitOnceIfReady();
+  }
+  private async runInitOnceIfReady() {
+    if (this.runInit && this.setInitMp4 && this.setSegment) {
+      this.runInit = false;
+      await this.onInit();
+    }
+  }
+}
+
+class StreamMetadataHelper {
+  private _processedSecs: number = 0;
+  private mime?: Mime;
+  private segmentMetadata: StreamSegmentMetadata[] = [];
+  private complete: boolean = false;
+  private subtitles?: string;
+  private cache: Cache;
+  private readonly streamId: string;
+  private readonly expirationDate: Date;
+  private readonly durationSecs: number;
+  constructor(
+    streamId: string,
+    durationSecs: number,
+    cache: Cache,
+    expirationDate: Date
+  ) {
+    this.streamId = streamId;
+    this.cache = cache;
+    this.expirationDate = expirationDate;
+    this.durationSecs = durationSecs;
+  }
+  async putSegment(segment: SegmentObject) {
+    this.segmentMetadata.push({
+      duration: segment.duration,
+      index: segment.sequence,
+    });
+    this._processedSecs += segment.duration;
+    await this.updateMetadata();
+  }
+
+  get processedSecs(): number {
+    return this._processedSecs;
+  }
+
+  async setMime(mime: Mime) {
+    this.mime = mime;
+    await this.updateMetadata();
+  }
+
+  async setSubtitles(subtitles: string) {
+    this.subtitles = subtitles;
+    await this.updateMetadata();
+  }
+
+  async setComplete() {
+    this.complete = true;
+    await this.updateMetadata();
+  }
+
+  getStreamMetadata(): StreamMetadata | undefined {
+    return this.mime
+      ? {
+          segments: this.segmentMetadata,
+          complete: this.complete,
+          subtitles: this.subtitles,
+          mime: this.mime,
+          processedSecs: this.processedSecs,
+          totalDurationSecs: this.durationSecs,
+        }
+      : undefined;
+  }
+  private async updateMetadata() {
+    const metadata = this.getStreamMetadata();
+    if (metadata) {
+      await this.cache.putStreamMetadata(
+        this.streamId,
+        metadata,
+        this.expirationDate
+      );
+    }
+  }
+}
 
 export interface StreamEvents {
   init: () => void;
@@ -52,8 +171,6 @@ export class Stream extends StreamEventEmitter {
   private cmd: FFmpegCommand;
   private sourcePipe: PassThrough;
   private m4f: Mp4Frag;
-  private processedSecs: number = 0;
-  private segments: StreamSegmentMetadata[] = [];
   readonly expirationDate: Date;
 
   private static readonly mp4VideoCodecs = [
@@ -74,11 +191,12 @@ export class Stream extends StreamEventEmitter {
   ];
 
   private static readonly mp4SubtitleCodecs = ["sbtt"];
-  private _init: Buffer | undefined;
   private cache: Cache;
   private hasInit: boolean = false;
   private hasSegment: boolean = false;
   private fileStream?: Readable;
+  private metadataHelper: StreamMetadataHelper;
+  private dataHelper: StreamDataHelper;
 
   constructor(props: StreamProps, cache: Cache) {
     super();
@@ -89,13 +207,15 @@ export class Stream extends StreamEventEmitter {
       Math.ceil(Date.now() + props.duration * 1000)
     );
     this.m4f = new Mp4Frag();
-
+    //const inputStart = props.startOffset - 30;
     const input = new ff.FFmpegInput("pipe:0", {
       loglevel: "quiet",
       probesize: "1000000",
       analyzeduration: "1000000",
-      ss: props.startOffset.toString(),
-      // reorder_queue_size: '5'
+      accurate_seek: "-accurate_seek",
+      // TODO seek to preceding keyframe instead, and remove ss from output
+      // seek_timestamp: "-seek_timestamp",
+      // ...(inputStart > 0 ? { ss: inputStart } : {}),
     });
 
     //TODO a crappy way of limiting bandwidth - this should be configurable and autoscaling
@@ -113,6 +233,7 @@ export class Stream extends StreamEventEmitter {
       // hls_allow_cache: "0",
       // hls_flags: "+delete_segments+omit_endlist",
       // hls_playlist_type: "vod"
+      ss: props.startOffset.toString(),
       ac: "2", // TODO makes audio streams stereo only because 5.1 doesn't work on android hls.js for some reason
       movflags: "+frag_keyframe+empty_moov+default_base_moof",
     });
@@ -120,17 +241,20 @@ export class Stream extends StreamEventEmitter {
 
     this.cmd.addInput(input);
     this.cmd.addOutput(output);
-  }
 
-  private static isMp4CopyCompatible(info: FfProbeInfo) {
-    return !first(
-      info.streams.filter(
-        (it) =>
-          it.codec_name &&
-          Stream.mp4AudioCodes
-            .concat(Stream.mp4VideoCodecs)
-            .indexOf(it.codec_name.toLowerCase()) === -1
-      )
+    this.metadataHelper = new StreamMetadataHelper(
+      this.props.id,
+      this.props.duration,
+      this.cache,
+      this.expirationDate
+    );
+    this.dataHelper = new StreamDataHelper(
+      this.cache,
+      this.props.id,
+      this.expirationDate,
+      () => {
+        this.emit("init");
+      }
     );
   }
 
@@ -194,8 +318,10 @@ export class Stream extends StreamEventEmitter {
     this.m4f.resetCache();
     this.process = this.cmd.spawn();
     this.fileStream?.destroy();
-
-    this.segments = [];
+    // const mp4BoxFile = Mp4Box.createFile();
+    // mp4BoxFile.onReady = async (it) => {
+    //   await this.metadataHelper.setCodecs(it.tracks.map((a) => a.codec));
+    // };
 
     this.cmd
       .on("exit", async (code, signal) => {
@@ -237,7 +363,21 @@ export class Stream extends StreamEventEmitter {
         this.process?.kill();
       }, 100);
     } else {
-      getFile(this.props.mediaInfo.location).then((readable) => {
+      getFile(this.props.mediaInfo.location).then(async (readable) => {
+        if (this.props.subtitle) {
+          (isFileLocation(this.props.subtitle)
+            ? this.handleSubtitles(
+                await getFile(this.props.subtitle),
+                this.props.startOffset
+              )
+            : this.handleSubtitles(
+                readable,
+                this.props.startOffset,
+                this.props.subtitle.index
+              )
+          ).then((subtitles) => this.metadataHelper.setSubtitles(subtitles));
+        }
+
         this.fileStream = readable;
         const errorHandler = (e: any) => {
           log.error(
@@ -255,46 +395,21 @@ export class Stream extends StreamEventEmitter {
       processOut
         .pipe(this.m4f)
         .on("segment", async (segment: SegmentObject) => {
-          // processOut?.pause();
           const buffer = segment.segment;
           if (!buffer) {
             log.warn(`Got empty segment: ${JSON.stringify(segment)}`);
             return;
           }
+          await Promise.all([
+            this.metadataHelper.putSegment(segment),
+            this.dataHelper.putSegment(segment),
+          ]);
 
-          this.processedSecs += segment.duration;
-          this.segments.push({
-            index: segment.sequence,
-            duration: segment.duration,
-          });
-          this.segments.sort((a, b) => a.index - b.index);
-          return Promise.all([
-            this.cache.putStreamMetadata(
-              this.props.id,
-              this.mkStreamMetadata(),
-              this.expirationDate
-            ),
-            this.cache.putSegmentM4s(
-              this.props.id,
-              segment.sequence,
-              buffer,
-              this.expirationDate
-            ),
-          ]).then(() => {
-            // processOut?.resume();
-            if (!this.hasSegment) {
-              this.hasSegment = true;
-              if (this.hasInit) {
-                this.emit("init");
-              }
-            }
-
-            log.info(
-              `Stream ${this.props.id}, Segment ${segment.sequence}, ${
-                this.processedSecs + this.props.startOffset
-              }/${this.props.duration} seconds`
-            );
-          });
+          log.info(
+            `Stream ${this.props.id}, Segment ${segment.sequence}, ${
+              this.metadataHelper.processedSecs + this.props.startOffset
+            }/${this.props.duration} seconds`
+          );
         })
         // TODO specify the emitted type in @types/mp4frag
         .on(
@@ -304,17 +419,13 @@ export class Stream extends StreamEventEmitter {
             initialization: Buffer;
             m3u8: string;
           }) => {
-            if (!this.hasInit && init.initialization) {
-              await this.cache.putInitMp4(
-                this.props.id,
-                init.initialization,
-                this.expirationDate
-              );
-              this.hasInit = true;
-              if (this.hasSegment) {
-                this.emit("init");
-              }
-            }
+            await Promise.all([
+              await this.dataHelper.putInitMp4(init.initialization),
+              await this.metadataHelper.setMime(
+                this.parseMp4FragMime(init.mime)
+              ),
+            ]);
+            log.info(`MIME: ${init.mime}`);
           }
         )
         .on("error", (reason) => {
@@ -335,8 +446,8 @@ export class Stream extends StreamEventEmitter {
       await Promise.all([
         this.cache.delStreamMetadata(this.props.id),
         this.cache.delInitMp4(this.props.id),
-        ...this.segments.map((seg) =>
-          this.cache.delSegmentM4s(this.props.id, seg.index)
+        ...(this.metadataHelper.getStreamMetadata()?.segments ?? []).map(
+          (seg) => this.cache.delSegmentM4s(this.props.id, seg.index)
         ),
       ]);
     } catch (e) {
@@ -354,23 +465,49 @@ export class Stream extends StreamEventEmitter {
     );
   }
 
-  private mkStreamMetadata(complete: boolean = false): StreamMetadata {
-    return {
-      segments: this.segments,
-      complete: complete,
-    };
-  }
-
   private async endStream(success: boolean) {
-    await this.cache.putStreamMetadata(
-      this.props.id,
-      this.mkStreamMetadata(true),
-      this.expirationDate
-    );
+    await this.metadataHelper.setComplete();
     if (success) {
       this.emit("fail");
     } else {
       this.emit("succeed");
     }
+  }
+
+  private parseMp4FragMime(mime: string): Mime {
+    const [typeStr, codecStr] = mime.split(";").map((it) => it.trim());
+    const codecs = codecStr
+      .replace("codecs=", "")
+      .replaceAll('"', "")
+      .split(",")
+      .map((it) => it.trim());
+    return {
+      mimeType: typeStr,
+      codecs: codecs,
+    };
+  }
+
+  private async handleSubtitles(
+    readable: Readable,
+    startOffset: number,
+    subtitleTrack: number = 0
+  ) {
+    const input = new ff.FFmpegInput("pipe:0", {});
+    const output = new ff.FFmpegOutput("pipe:1", {
+      f: "webvtt",
+      ss: startOffset.toString(),
+      // map: `${subtitleTrack}:s:0`, //TODO get embedded subtitles working
+    });
+
+    const cmd = new ff.FFmpegCommand();
+    cmd.addInput(input);
+    cmd.addOutput(output);
+    log.info(`Extracting subtitles with: ${cmd.toString()}`);
+    const process = cmd.spawn();
+    readable.pipe(process.stdin);
+    const subs = (await readFile(process.stdout)).toString("utf8");
+    log.debug(`Subtitles: ${subs}`);
+    return subs;
+    // return (await readFile(readable)).toString("utf8");
   }
 }
