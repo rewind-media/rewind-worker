@@ -1,4 +1,4 @@
-import { StreamManager } from "./StreamManager";
+import { StreamManager } from "./hls/StreamManager";
 import {
   loadConfig,
   RedisJobQueue,
@@ -51,7 +51,7 @@ streamJobQueue.register(
         log.info(`Stream ${job.payload.id} received cancel event`);
         await streamManager.deleteStream(job.payload.id);
       });
-      stream.run();
+      await stream.run();
     } else {
       context.fail("Failed to initialize stream");
     }
