@@ -28,7 +28,7 @@ const imageJobQueue = new RedisJobQueue<ImageInfo, undefined>(redis, "Image");
 
 streamJobQueue.register(
   async (
-    job: Job<StreamProps, undefined>,
+    job: Job<StreamProps>,
     context: WorkerContext<undefined>,
     workerEvents: WorkerEventEmitter
   ) => {
@@ -59,11 +59,7 @@ streamJobQueue.register(
 );
 
 imageJobQueue.register(
-  async (
-    job: Job<ImageInfo, undefined>,
-    context: WorkerContext<undefined>,
-    workerEvents: WorkerEventEmitter
-  ) => {
+  async (job: Job<ImageInfo>, context: WorkerContext<undefined>) => {
     context.start();
     try {
       const image = await getFile(job.payload.location).then((it) =>

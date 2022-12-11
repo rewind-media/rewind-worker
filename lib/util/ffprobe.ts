@@ -41,7 +41,7 @@ export function getInfo(filePath: string): Promise<FfProbeInfo> {
     const ffprobe = spawn("ffprobe", params);
     streamToString(ffprobe.stdout).then((str) => (out = str));
     streamToString(ffprobe.stderr).then((str) => (err = str));
-    ffprobe.on("close", (code, signal) => {
+    ffprobe.on("close", (code) => {
       if (!code) {
         succeed();
       } else {
@@ -59,7 +59,7 @@ export function getInfo(filePath: string): Promise<FfProbeInfo> {
 
 function streamToString(stream: Stream): Promise<string> {
   const chunks: Buffer[] = [];
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     stream.on("data", (chunk) => {
       log.debug(chunk);
       chunks.push(Buffer.from(chunk));

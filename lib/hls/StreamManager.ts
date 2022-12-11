@@ -1,10 +1,10 @@
 import { Stream } from "./Stream";
-import { JobQueue, RedisCache, Cache } from "@rewind-media/rewind-common";
+import { Cache } from "@rewind-media/rewind-common";
 import { StreamProps } from "@rewind-media/rewind-protocol";
 
 export class StreamManager {
   private readonly streams: Map<string, Stream>;
-  private cache: Cache;
+  private readonly cache: Cache;
 
   updateStream(monProps: StreamProps): Stream {
     const oldMon = this.streams.get(monProps.id);

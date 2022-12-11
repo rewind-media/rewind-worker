@@ -1,6 +1,6 @@
 import { FFmpegCommand } from "fessonia";
 import { ChildProcess } from "child_process";
-import { PassThrough, Readable, Writable } from "node:stream";
+import { Readable, Writable } from "node:stream";
 import Mp4Frag, { SegmentObject } from "mp4frag";
 import { FfProbeInfo } from "../util/ffprobe";
 import { Cache, getFile, Mime, readFile } from "@rewind-media/rewind-common";
@@ -173,8 +173,8 @@ export class Stream extends StreamEventEmitter {
           )
         : Stream.handleSubtitles(
             readable,
-            this.props.startOffset,
-            this.props.subtitle.index
+            this.props.startOffset
+            // this.props.subtitle.index
           )
       ).then((subtitles) => this.metadataHelper.setSubtitles(subtitles));
     }
@@ -182,10 +182,10 @@ export class Stream extends StreamEventEmitter {
 
   private bindProcessEmitter(process: ChildProcess) {
     process
-      .on("exit", async (code, signal) => {
+      .on("exit", async (code) => {
         await this.endStream(code !== 0);
       })
-      .on("close", async (code, signal) => {
+      .on("close", async (code) => {
         await this.endStream(code !== 0);
       })
       .on("disconnect", async () => {
@@ -199,10 +199,10 @@ export class Stream extends StreamEventEmitter {
 
   private bindCmdEmitter(cmd: FFmpegCommand) {
     cmd
-      .on("exit", async (code, signal) => {
+      .on("exit", async (code) => {
         await this.endStream(code !== 0);
       })
-      .on("close", async (code, signal) => {
+      .on("close", async (code) => {
         await this.endStream(code !== 0);
       })
       .on("disconnect", async () => {
@@ -256,27 +256,28 @@ export class Stream extends StreamEventEmitter {
 
   private static parseMp4FragMime(mime: string): Mime {
     const [typeStr, codecStr] = mime.split(";").map((it) => it.trim());
-    const codecs = codecStr
+    const codecs = (codecStr ?? "")
       .replace("codecs=", "")
       .replaceAll('"', "")
       .split(",")
-      .map((it) => it.trim());
+      .map((it) => it.trim())
+      .filter((it) => it == "");
     return {
-      mimeType: typeStr,
-      codecs: codecs,
+      mimeType: typeStr ?? "",
+      codecs: codecs ?? [],
     };
   }
 
   private static async handleSubtitles(
     readable: Readable,
-    startOffset: number,
-    subtitleTrack: number = 0
+    startOffset: number
+    // subtitleTrack: number = 0 //TODO get embedded subtitles working
   ) {
     const input = new ff.FFmpegInput("pipe:0", {});
     const output = new ff.FFmpegOutput("pipe:1", {
       f: "webvtt",
       ss: startOffset.toString(),
-      // map: `${subtitleTrack}:s:0`, //TODO get embedded subtitles working
+      // map: `${subtitleTrack}:s:0`
     });
 
     const cmd = new ff.FFmpegCommand();
