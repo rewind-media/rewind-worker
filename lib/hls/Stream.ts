@@ -10,6 +10,7 @@ import { FFProbeStream } from "ffprobe";
 import { StreamDataHelper } from "./StreamDataHelper";
 import { StreamMetadataHelper } from "./StreamMetadataHelper";
 import { StreamEventEmitter } from "./models";
+import { Duration } from "durr";
 
 const ff = require("fessonia")({
   debug: true,
@@ -37,9 +38,7 @@ export class Stream extends StreamEventEmitter {
     super();
     this.cache = cache;
     this.props = props;
-    this.expirationDate = new Date(
-      Math.ceil(Date.now() + props.duration * 1000)
-    );
+    this.expirationDate = Duration.seconds(props.duration * 3).after();
     this.m4f = new Mp4Frag();
     //const inputStart = props.startOffset - 30;
     const input = new ff.FFmpegInput("pipe:0", {

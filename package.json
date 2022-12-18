@@ -23,6 +23,7 @@
     "@types/mp4frag": "^0.6.1",
     "@types/node": "^16.18.6",
     "config": "^3.3.8",
+    "durr": "^0.0.3",
     "fessonia": "^2.2.2",
     "ffprobe": "^1.1.2",
     "fs-extra": "^10.1.0",
