@@ -1,4 +1,4 @@
-import { StreamManager } from "./hls/StreamManager";
+import { StreamManager } from "./hls/StreamManager.js";
 import {
   loadConfig,
   RedisJobQueue,
@@ -9,10 +9,12 @@ import {
   getFile,
   readFile,
 } from "@rewind-media/rewind-common";
-import { WorkerLogger } from "./log";
-import Redis from "ioredis";
+import { WorkerLogger } from "./log.js";
 import { ImageInfo, StreamProps } from "@rewind-media/rewind-protocol";
 import "fs/promises";
+import RedisModule from "ioredis";
+// TODO: https://github.com/luin/ioredis/issues/1642
+const Redis = RedisModule.default;
 
 const log = WorkerLogger.getChildCategory("main");
 const config = loadConfig();

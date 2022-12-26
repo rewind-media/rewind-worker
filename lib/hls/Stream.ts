@@ -2,17 +2,18 @@ import { FFmpegCommand } from "fessonia";
 import { ChildProcess } from "child_process";
 import { Readable, Writable } from "node:stream";
 import Mp4Frag, { SegmentObject } from "mp4frag";
-import { FfProbeInfo } from "../util/ffprobe";
+import { FfProbeInfo } from "../util/ffprobe.js";
 import { Cache, getFile, Mime, readFile } from "@rewind-media/rewind-common";
-import { WorkerLogger } from "../log";
+import { WorkerLogger } from "../log.js";
 import { isFileLocation, StreamProps } from "@rewind-media/rewind-protocol";
 import { FFProbeStream } from "ffprobe";
-import { StreamDataHelper } from "./StreamDataHelper";
-import { StreamMetadataHelper } from "./StreamMetadataHelper";
-import { StreamEventEmitter } from "./models";
+import { StreamDataHelper } from "./StreamDataHelper.js";
+import { StreamMetadataHelper } from "./StreamMetadataHelper.js";
+import { StreamEventEmitter } from "./models.js";
 import { Duration } from "durr";
+import fessonia from "fessonia";
 
-const ff = require("fessonia")({
+const ff = fessonia({
   debug: true,
   log_warnings: true,
 });

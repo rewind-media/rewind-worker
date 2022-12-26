@@ -1,9 +1,9 @@
 import { spawn } from "child_process";
 import { FFProbeResult } from "ffprobe";
 import { Stream } from "stream";
-import { WorkerLogger } from "../log";
+import { WorkerLogger } from "../log.js";
 
-const log = WorkerLogger.getChildCategory("ffmpeg.prob");
+const log = WorkerLogger.getChildCategory("ffmpeg.probe");
 
 export interface FfProbeInfoFormat {
   duration?: number;

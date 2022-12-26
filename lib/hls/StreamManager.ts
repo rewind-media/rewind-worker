@@ -1,4 +1,4 @@
-import { Stream } from "./Stream";
+import { Stream } from "./Stream.js";
 import { Cache } from "@rewind-media/rewind-common";
 import { StreamProps } from "@rewind-media/rewind-protocol";
 
