@@ -262,7 +262,7 @@ export class Stream extends StreamEventEmitter {
       .replaceAll('"', "")
       .split(",")
       .map((it) => it.trim())
-      .filter((it) => it == "");
+      .filter((it) => it != "");
     return {
       mimeType: typeStr ?? "",
       codecs: codecs ?? [],
