@@ -113,7 +113,8 @@ export class Stream extends StreamEventEmitter {
       .pipe(this.m4f)
       .on("segment", this.mkSegmentHandler())
       .on("initialized", this.mkInitHandler())
-      .on("error", errorHandler);
+      .on("error", errorHandler)
+      .on("close", errorHandler);
   }
 
   private mkErrorHandler(processIn: Writable) {
@@ -283,9 +284,19 @@ export class Stream extends StreamEventEmitter {
     const cmd = new ff.FFmpegCommand();
     cmd.addInput(input);
     cmd.addOutput(output);
+    cmd.on("error", (e) => {
+      log.error("Failed to process file for subtitle extraction", e);
+      readable.unpipe(process.stdin);
+    });
+
     log.info(`Extracting subtitles with: ${cmd.toString()}`);
     const process = cmd.spawn();
-    readable.pipe(process.stdin);
+
+    readable.pipe(process.stdin).on("error", (e) => {
+      log.error("Failed to read file for subtitle extraction", e);
+      readable.unpipe(process.stdin);
+    });
+
     const subs = (await readFile(process.stdout)).toString("utf8");
     log.debug(`Subtitles: ${subs}`);
     return subs;
