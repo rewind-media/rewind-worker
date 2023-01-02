@@ -1,0 +1,21 @@
+FROM debian:11-slim
+RUN apt update -y && apt upgrade -y
+RUN apt install -y ffmpeg
+
+RUN apt install software-properties-common -y && \
+    add-apt-repository ppa:graphics-drivers && \
+    apt install nvidia-driver-440 -y
+
+# TODO verify download at a minimum, ideally find a better way to install latest version of nodejs
+RUN apt install -y curl && \
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash - && apt-get install -y nodejs
+
+WORKDIR /rewind/worker
+
+COPY . .
+RUN rm -rf node_modules dist
+
+RUN npm install
+RUN npm run build
+
+CMD ["npm", "run", "start"]
