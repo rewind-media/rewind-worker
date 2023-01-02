@@ -3,11 +3,12 @@ import {
   loadConfig,
   RedisJobQueue,
   Job,
-  WorkerContext,
   WorkerEventEmitter,
   RedisCache,
   getFile,
   readFile,
+  ClientEventEmitter,
+  StreamClientEvents,
 } from "@rewind-media/rewind-common";
 import { WorkerLogger } from "./log.js";
 import { ImageInfo, StreamProps } from "@rewind-media/rewind-protocol";
@@ -31,22 +32,22 @@ const imageJobQueue = new RedisJobQueue<ImageInfo, undefined>(redis, "Image");
 streamJobQueue.register(
   async (
     job: Job<StreamProps>,
-    context: WorkerContext<undefined>,
+    context: ClientEventEmitter<undefined, StreamClientEvents>,
     workerEvents: WorkerEventEmitter
   ) => {
     log.info(`Received job ${JSON.stringify(job)}`);
     const stream = streamManager.updateStream(job.payload);
     if (stream) {
       stream.on("fail", () => {
-        context.fail("Failed to process stream");
+        context.emit("fail", "Failed to process stream");
       });
       stream.on("succeed", () => {
-        context.success(undefined);
+        context.emit("success", undefined);
       });
 
       stream.on("init", () => {
         log.info(`Stream ${job.payload.id} initialized.`);
-        context.start();
+        context.emit("start");
       });
 
       workerEvents.on("cancel", async () => {
@@ -55,23 +56,22 @@ streamJobQueue.register(
       });
       await stream.run();
     } else {
-      context.fail("Failed to initialize stream");
+      context.emit("fail", "Failed to initialize stream");
     }
   }
 );
 
 imageJobQueue.register(
-  async (job: Job<ImageInfo>, context: WorkerContext<undefined>) => {
-    context.start();
+  async (job: Job<ImageInfo>, context: ClientEventEmitter<undefined>) => {
     try {
       const image = await getFile(job.payload.location).then((it) =>
         readFile(it)
       );
       await cache.putImage(job.payload.id, image, 3600);
-      context.success(undefined);
+      context.emit("success", undefined);
     } catch (e) {
       log.error(`Error processing job ${JSON.stringify(job)}`, e);
-      context.fail(JSON.stringify(e));
+      context.emit("fail", JSON.stringify(e));
     }
   }
 );
