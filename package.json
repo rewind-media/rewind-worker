@@ -13,8 +13,8 @@
   "private": false,
   "dependencies": {
     "@jsbits/escape-regex-str": "^1.0.3",
-    "@rewind-media/rewind-common": "^0.1.45",
-    "@rewind-media/rewind-protocol": "^0.1.18",
+    "@rewind-media/rewind-common": "^0.1.46",
+    "@rewind-media/rewind-protocol": "^0.1.19",
     "@types/config": "^0.0.41",
     "@types/ffprobe": "^1.1.3",
     "@types/fs-extra": "^9.0.13",
