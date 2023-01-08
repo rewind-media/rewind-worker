@@ -1,5 +1,6 @@
 import { Cache } from "@rewind-media/rewind-common";
 import { SegmentObject } from "mp4frag";
+import { Duration } from "durr";
 
 export class StreamDataHelper {
   private readonly cache: Cache;
@@ -7,18 +8,11 @@ export class StreamDataHelper {
   private setInitMp4: boolean = false;
   private runInit: boolean = true;
   private readonly onInit: () => void;
-  private readonly expiration: Date;
   private readonly streamId: string;
 
-  constructor(
-    cache: Cache,
-    streamId: string,
-    expiration: Date,
-    onInit: () => void
-  ) {
+  constructor(cache: Cache, streamId: string, onInit: () => void) {
     this.cache = cache;
     this.onInit = onInit;
-    this.expiration = expiration;
     this.streamId = streamId;
   }
 
@@ -28,7 +22,7 @@ export class StreamDataHelper {
         this.streamId,
         segment.sequence,
         segment.segment,
-        this.expiration
+        Duration.seconds(15).after()
       );
       this.setSegment = true;
       await this.runInitOnceIfReady();
@@ -36,7 +30,11 @@ export class StreamDataHelper {
   }
 
   async putInitMp4(initMp4: Buffer) {
-    await this.cache.putInitMp4(this.streamId, initMp4, this.expiration);
+    await this.cache.putInitMp4(
+      this.streamId,
+      initMp4,
+      Duration.seconds(15).after()
+    );
     this.setInitMp4 = true;
     await this.runInitOnceIfReady();
   }

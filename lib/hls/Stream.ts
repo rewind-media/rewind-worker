@@ -10,7 +10,6 @@ import { FFProbeStream } from "ffprobe";
 import { StreamDataHelper } from "./StreamDataHelper.js";
 import { StreamMetadataHelper } from "./StreamMetadataHelper.js";
 import { StreamEventEmitter } from "./models.js";
-import { Duration } from "durr";
 import fessonia from "fessonia";
 
 const ff = fessonia({
@@ -27,7 +26,6 @@ const log = WorkerLogger.getChildCategory("Stream");
 export class Stream extends StreamEventEmitter {
   private readonly cache: Cache;
   private readonly cmd: FFmpegCommand;
-  private readonly expirationDate: Date;
   private readonly props: StreamProps;
   private readonly metadataHelper: StreamMetadataHelper;
   private readonly m4f: Mp4Frag;
@@ -39,7 +37,6 @@ export class Stream extends StreamEventEmitter {
     super();
     this.cache = cache;
     this.props = props;
-    this.expirationDate = Duration.seconds(props.duration * 3).after();
     this.m4f = new Mp4Frag();
     //const inputStart = props.startOffset - 30;
     const input = new ff.FFmpegInput("pipe:0", {
@@ -79,17 +76,11 @@ export class Stream extends StreamEventEmitter {
     this.metadataHelper = new StreamMetadataHelper(
       this.props.id,
       this.props.duration,
-      this.cache,
-      this.expirationDate
+      this.cache
     );
-    this.dataHelper = new StreamDataHelper(
-      this.cache,
-      this.props.id,
-      this.expirationDate,
-      () => {
-        this.emit("init");
-      }
-    );
+    this.dataHelper = new StreamDataHelper(this.cache, this.props.id, () => {
+      this.emit("init");
+    });
   }
 
   async run() {

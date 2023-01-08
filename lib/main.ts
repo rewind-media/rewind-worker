@@ -9,11 +9,13 @@ import {
   readFile,
   ClientEventEmitter,
   StreamClientEvents,
+  StreamWorkerEvents,
 } from "@rewind-media/rewind-common";
 import { WorkerLogger } from "./log.js";
 import { ImageInfo, StreamProps } from "@rewind-media/rewind-protocol";
 import "fs/promises";
 import RedisModule from "ioredis";
+import { StreamHeartbeat } from "./hls/StreamHeartbeat.js";
 // TODO: https://github.com/luin/ioredis/issues/1642
 const Redis = RedisModule.default;
 
@@ -33,16 +35,22 @@ streamJobQueue.register(
   async (
     job: Job<StreamProps>,
     context: ClientEventEmitter<undefined, StreamClientEvents>,
-    workerEvents: WorkerEventEmitter
+    workerEvents: WorkerEventEmitter<StreamWorkerEvents>
   ) => {
     log.info(`Received job ${JSON.stringify(job)}`);
     const stream = streamManager.updateStream(job.payload);
     if (stream) {
+      const heartbeat = new StreamHeartbeat(() => {
+        streamManager.deleteStream(job.payload.id);
+        context.emit("fail", "Failed to heartbeat");
+      });
       stream.on("fail", () => {
         context.emit("fail", "Failed to process stream");
+        heartbeat.cancel();
       });
       stream.on("succeed", () => {
         context.emit("success", undefined);
+        heartbeat.cancel();
       });
 
       stream.on("init", () => {
@@ -52,7 +60,10 @@ streamJobQueue.register(
 
       workerEvents.on("cancel", async () => {
         log.info(`Stream ${job.payload.id} received cancel event`);
-        await streamManager.deleteStream(job.payload.id);
+        heartbeat.cancel(true);
+      });
+      workerEvents.on("heartbeat", () => {
+        heartbeat.invoke();
       });
       await stream.run();
     } else {

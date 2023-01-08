@@ -5,6 +5,7 @@ import {
   StreamSegmentMetadata,
 } from "@rewind-media/rewind-common";
 import { SegmentObject } from "mp4frag";
+import { Duration } from "durr";
 
 export class StreamMetadataHelper {
   private _processedSecs: number = 0;
@@ -14,18 +15,11 @@ export class StreamMetadataHelper {
   private subtitles?: string;
   private cache: Cache;
   private readonly streamId: string;
-  private readonly expirationDate: Date;
   private readonly durationSecs: number;
 
-  constructor(
-    streamId: string,
-    durationSecs: number,
-    cache: Cache,
-    expirationDate: Date
-  ) {
+  constructor(streamId: string, durationSecs: number, cache: Cache) {
     this.streamId = streamId;
     this.cache = cache;
-    this.expirationDate = expirationDate;
     this.durationSecs = durationSecs;
   }
 
@@ -76,7 +70,7 @@ export class StreamMetadataHelper {
       await this.cache.putStreamMetadata(
         this.streamId,
         metadata,
-        this.expirationDate
+        Duration.seconds(15).after()
       );
     }
   }
